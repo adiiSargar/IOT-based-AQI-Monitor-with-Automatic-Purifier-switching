@@ -1,0 +1,108 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <BluetoothSerial.h>
+#include <DHT.h>
+
+// OLED Display
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Bluetooth
+BluetoothSerial SerialBT;
+
+// Pins
+#define DHTPIN 14
+#define DHTTYPE DHT22
+#define MQ135_PIN 34
+#define BUZZER_PIN 4
+#define DUST_SENSOR_LED 13
+#define DUST_SENSOR_ANALOG 35
+
+// DHT object
+DHT dht(DHTPIN, DHTTYPE);
+
+void setup() {
+  Serial.begin(9600);
+  SerialBT.begin("PollutionMonitor");
+  dht.begin();
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(DUST_SENSOR_LED, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(DUST_SENSOR_LED, HIGH);
+
+  // OLED Init
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED init failed");
+    while (true);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(10, 20);
+  display.println("Pollution Monitor");
+  display.display();
+  delay(2000);
+}
+
+void loop() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  int airValue = analogRead(MQ135_PIN);
+  float pm2_5 = readDust();
+
+  // Air Quality Status
+  String airStatus = "";
+  if (airValue < 1000) airStatus = "Good";
+  else if (airValue < 2000) airStatus = "Medium";
+  else airStatus = "Bad";
+
+  // OLED Display
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("Temp: "); display.print(temperature); display.print(" C");
+  display.setCursor(0, 10);
+  display.print("Hum: "); display.print(humidity); display.print(" %");
+  display.setCursor(0, 20);
+  display.print("Air: "); display.print(airStatus);
+  display.setCursor(0, 30);
+  display.print("AirVal: "); display.print(airValue);
+  display.setCursor(0, 40);
+  display.print("PM2.5: "); display.print(pm2_5); display.print(" ug/m3");
+  display.display();
+
+  // Buzzer Alert
+  if (pm2_5 > 100) {
+    digitalWrite(BUZZER_PIN, HIGH);
+  } else {
+    digitalWrite(BUZZER_PIN, LOW);
+  }
+
+  // Bluetooth Output
+  SerialBT.println("---- Pollution Report ----");
+  SerialBT.print("Temp: "); SerialBT.print(temperature); SerialBT.println(" C");
+  SerialBT.print("Humidity: "); SerialBT.print(humidity); SerialBT.println(" %");
+  SerialBT.print("Air: "); SerialBT.print(airStatus); SerialBT.print(" ("); SerialBT.print(airValue); SerialBT.println(")");
+  SerialBT.print("PM2.5: "); SerialBT.print(pm2_5); SerialBT.println(" ug/m3");
+  SerialBT.println("--------------------------\n");
+
+  delay(2000);
+}
+
+// Read PM2.5 Value from GP2Y1010AU0F
+float readDust() {
+  digitalWrite(DUST_SENSOR_LED, LOW);
+  delayMicroseconds(280);
+  int voRaw = analogRead(DUST_SENSOR_ANALOG);
+  delayMicroseconds(40);
+  digitalWrite(DUST_SENSOR_LED, HIGH);
+  delayMicroseconds(9680);
+
+  float voltage = voRaw * (5.0 / 4095.0); // ESP32 ADC resolution
+  float dustDensity = (voltage - 0.9) / 0.005; // mg/m3 (approx conversion)
+  return dustDensity;
+}
